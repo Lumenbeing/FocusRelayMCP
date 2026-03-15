@@ -143,3 +143,27 @@ Until new evidence disproves this decision:
 - do not make architecture decisions from any benchmark run unless the transport implementation is verified first
 - do not compare transports and query changes in the same experiment
 - treat pure JXA as a reference/verification path, not the production architecture
+
+## Post-Decision Validation (2026-03-14)
+
+Subsequent clean-branch work reinforced the decision to stay on `plugin-url`.
+
+Relevant artifacts:
+- Full clean suite after `list_tasks` hardening:
+  - `docs/benchmarks/suite-post-listtasks-hardening-20260313-221745/summary.md`
+- `list_tasks` post-hardening 1-hour run:
+  - `docs/benchmarks/list-tasks-1h-post-hardening-20260313-145309/summary.md`
+- `list_tasks` post-stream-fast-path 1-hour run:
+  - `docs/benchmarks/list-tasks-1h-post-stream-fast-path-20260314-2313/summary.md`
+- Progress note:
+  - `docs/performance-progress-2026-03-14.md`
+
+What changed after the decision:
+- `list_tasks` timeout recovery was hardened on `plugin-url`.
+- The old plugin timeout pattern in the transport A/B no longer reproduced in the clean 1-hour validation run.
+- A later shared-path cleanup and no-total-count streaming path improved `list_tasks` median latency further without introducing new reliability failures.
+
+Updated interpretation:
+- `plugin-url` remains the best current production choice.
+- The transport question is no longer the main optimization lever.
+- Further work should continue to target query/runtime behavior on `plugin-url` rather than transport replacement.

@@ -427,14 +427,14 @@
             projectFilter: filter.project,
             
             // Date filters (pre-parsed)
-            dueBefore: filter.dueBefore ? parseFilterDate(filter.dueBefore, response.warnings) : null,
-            dueAfter: filter.dueAfter ? parseFilterDate(filter.dueAfter, response.warnings) : null,
-            plannedBefore: filter.plannedBefore ? parseFilterDate(filter.plannedBefore, response.warnings) : null,
-            plannedAfter: filter.plannedAfter ? parseFilterDate(filter.plannedAfter, response.warnings) : null,
-            deferBefore: filter.deferBefore ? parseFilterDate(filter.deferBefore, response.warnings) : null,
-            deferAfter: filter.deferAfter ? parseFilterDate(filter.deferAfter, response.warnings) : null,
-            completedBefore: filter.completedBefore ? parseFilterDate(filter.completedBefore, response.warnings) : null,
-            completedAfter: filter.completedAfter ? parseFilterDate(filter.completedAfter, response.warnings) : null,
+            dueBeforeTs: filter.dueBefore ? safe(() => parseFilterDate(filter.dueBefore, response.warnings).getTime()) : null,
+            dueAfterTs: filter.dueAfter ? safe(() => parseFilterDate(filter.dueAfter, response.warnings).getTime()) : null,
+            plannedBeforeTs: filter.plannedBefore ? safe(() => parseFilterDate(filter.plannedBefore, response.warnings).getTime()) : null,
+            plannedAfterTs: filter.plannedAfter ? safe(() => parseFilterDate(filter.plannedAfter, response.warnings).getTime()) : null,
+            deferBeforeTs: filter.deferBefore ? safe(() => parseFilterDate(filter.deferBefore, response.warnings).getTime()) : null,
+            deferAfterTs: filter.deferAfter ? safe(() => parseFilterDate(filter.deferAfter, response.warnings).getTime()) : null,
+            completedBeforeTs: filter.completedBefore ? safe(() => parseFilterDate(filter.completedBefore, response.warnings).getTime()) : null,
+            completedAfterTs: filter.completedAfter ? safe(() => parseFilterDate(filter.completedAfter, response.warnings).getTime()) : null,
             
             // Duration filters
             maxEstimatedMinutes: filter.maxEstimatedMinutes,
@@ -446,71 +446,77 @@
           };
           
           const projectView = (typeof filter.projectView === "string") ? filter.projectView.toLowerCase() : null;
-          const isEverythingView = projectView === "everything";
 
           // Helper function to check if a task matches all filters
-          function taskMatchesFilters(t) {
+          function taskMatchesFilters(t, knownTaskStatus, knownProject) {
+            const taskStatusValue = knownTaskStatus === undefined ? taskStatus(t) : knownTaskStatus;
             // Status checks
             if (filterState.completed !== undefined) {
-              const taskCompleted = isCompletedStatus(t);
+              const taskCompleted = isCompletedStatusValue(taskStatusValue);
               if (taskCompleted !== filterState.completed) return false;
             } else if (!isEverything) {
-              if (!isRemainingStatus(t)) return false;
+              if (isCompletedStatusValue(taskStatusValue) || isDroppedStatusValue(taskStatusValue)) return false;
             }
             if (filterState.flagged !== undefined) {
               const taskFlagged = Boolean(t.flagged);
               if (taskFlagged !== filterState.flagged) return false;
             }
+            let project = knownProject === undefined ? null : knownProject;
             if (filterState.availableOnly) {
-              if (!isTaskAvailable(t)) return false;
+              if (!isTaskAvailableWithStatus(t, taskStatusValue, project === null ? undefined : project)) return false;
             }
             
             // Project check
-            const project = safe(() => t.containingProject);
             if (filterState.projectFilter) {
+              if (project === null) {
+                project = safe(() => t.containingProject);
+              }
               if (!project) return false;
               const pid = String(safe(() => project.id.primaryKey) || "");
               const pname = String(safe(() => project.name) || "");
               if (pid !== filterState.projectFilter && pname !== filterState.projectFilter) return false;
             }
             if (projectView) {
+              if (project === null) {
+                project = safe(() => t.containingProject);
+              }
               if (!projectMatchesView(project, projectView, true)) return false;
             }
             
             // Date checks
-            if (filterState.dueBefore) {
+            if (filterState.dueBeforeTs !== null) {
               const due = getTaskDateTimestamp(t, task => task.dueDate);
-              if (due === null || due > filterState.dueBefore.getTime()) return false;
+              if (due === null || due > filterState.dueBeforeTs) return false;
             }
-            if (filterState.dueAfter) {
+            if (filterState.dueAfterTs !== null) {
               const due = getTaskDateTimestamp(t, task => task.dueDate);
-              if (due === null || due < filterState.dueAfter.getTime()) return false;
+              if (due === null || due < filterState.dueAfterTs) return false;
             }
-            if (filterState.deferBefore) {
+            if (filterState.deferBeforeTs !== null) {
               const defer = getTaskDateTimestamp(t, task => task.deferDate);
-              if (defer === null || defer > filterState.deferBefore.getTime()) return false;
+              if (defer === null || defer > filterState.deferBeforeTs) return false;
             }
-            if (filterState.deferAfter) {
+            if (filterState.deferAfterTs !== null) {
               const defer = getTaskDateTimestamp(t, task => task.deferDate);
-              if (defer === null || defer < filterState.deferAfter.getTime()) return false;
+              if (defer === null || defer < filterState.deferAfterTs) return false;
             }
-            if (filterState.plannedBefore) {
+            if (filterState.plannedBeforeTs !== null) {
               const planned = getTaskDateTimestamp(t, task => task.plannedDate);
-              if (planned === null || planned > filterState.plannedBefore.getTime()) return false;
+              if (planned === null || planned > filterState.plannedBeforeTs) return false;
             }
-            if (filterState.plannedAfter) {
+            if (filterState.plannedAfterTs !== null) {
               const planned = getTaskDateTimestamp(t, task => task.plannedDate);
-              if (planned === null || planned < filterState.plannedAfter.getTime()) return false;
+              if (planned === null || planned < filterState.plannedAfterTs) return false;
             }
             
             // Completion date checks
-            if (filterState.completedBefore) {
+            if (filterState.completedBeforeTs !== null) {
               const completed = getTaskDateTimestamp(t, task => task.completionDate);
-              if (completed === null || completed > filterState.completedBefore.getTime()) return false;
+              if (completed === null || completed > filterState.completedBeforeTs) return false;
             }
-            if (filterState.completedAfter) {
+            if (filterState.completedAfterTs !== null) {
               const completed = getTaskDateTimestamp(t, task => task.completionDate);
-              if (completed === null || completed < filterState.completedAfter.getTime()) return false;
+              if (completed === null || completed < filterState.completedAfterTs) return false;
             }
             
             // Duration checks
@@ -544,65 +550,163 @@
           const includeTotalCount = filter.includeTotalCount === true;
           const limit = request.page && request.page.limit ? request.page.limit : 50;
           const offset = request.page && request.page.cursor ? parseInt(request.page.cursor, 10) : 0;
-
-          // Filter first, then apply pagination. Cursor semantics are based on the
-          // filtered/sorted result set, not the original OmniFocus flattened list.
-          const filterPassStart = Date.now();
-          tasks = tasks.filter(taskMatchesFilters);
-          markListTasks("after_filter_pass", {
-            count: tasks.length,
-            durationMs: Date.now() - filterPassStart
-          });
-          const totalCount = includeTotalCount ? tasks.length : null;
-
-          // Sort by completion date descending when filtering by completed tasks
-          // This matches OmniFocus Completed perspective behavior
-          if (filterState.completed === true || filterState.completedAfter || filterState.completedBefore) {
-            const sortStart = Date.now();
-            tasks.sort((a, b) => {
-              const dateA = getTaskDateTimestamp(a, t => t.completionDate) || 0;
-              const dateB = getTaskDateTimestamp(b, t => t.completionDate) || 0;
-              return dateB - dateA;
-            });
-            markListTasks("after_completion_sort", {
-              count: tasks.length,
-              durationMs: Date.now() - sortStart
-            });
-          }
-
-          // Apply offset + limit to the filtered/sorted task list.
           const safeOffset = Number.isFinite(offset) && offset > 0 ? offset : 0;
-          const pageTasks = tasks.slice(safeOffset, safeOffset + limit);
-          markListTasks("after_paging", {
-            pageCount: pageTasks.length,
-            totalCount: totalCount,
-            offset: safeOffset,
-            limit: limit
-          });
-          const payloadStart = Date.now();
-          const items = pageTasks.map(t => taskToPayload(t, fields));
-          markListTasks("after_payload_map", {
-            returnedCount: items.length,
-            durationMs: Date.now() - payloadStart
-          });
-          
-          // Calculate returned count (actual items in this response)
-          const returnedCount = items.length;
-          
-          // Calculate pagination cursor
-          const hasMore = (safeOffset + items.length) < tasks.length;
-          const nextCursor = hasMore ? String(safeOffset + items.length) : null;
-          
-          // Build response with both counts
-          response.data = { items: items, nextCursor: nextCursor, returnedCount: returnedCount };
-          if (includeTotalCount) {
-            response.data.totalCount = totalCount;
-          }
-          if (listTasksDebug) {
-            listTasksDebug.totalTimingMs = Date.now() - start;
-            try {
-              writeJSON(basePath + "/logs/list_tasks_debug_" + requestId + ".json", listTasksDebug);
-            } catch (debugError) {}
+          const requiresCompletionSort = filterState.completed === true || filterState.completedAfterTs !== null || filterState.completedBeforeTs !== null;
+          const hasScheduleFilters =
+            filterState.dueBeforeTs !== null ||
+            filterState.dueAfterTs !== null ||
+            filterState.deferBeforeTs !== null ||
+            filterState.deferAfterTs !== null ||
+            filterState.plannedBeforeTs !== null ||
+            filterState.plannedAfterTs !== null;
+          const hasAdvancedFilters =
+            Boolean(filterState.projectFilter) ||
+            Boolean(projectView) ||
+            hasScheduleFilters ||
+            filterState.maxEstimatedMinutes !== undefined ||
+            filterState.minEstimatedMinutes !== undefined ||
+            Boolean(filterState.tags) ||
+            Boolean(filter.search);
+          const useAvailableStreamFastPath =
+            !includeTotalCount &&
+            !requiresCompletionSort &&
+            filterState.availableOnly &&
+            !hasAdvancedFilters;
+
+          if (useAvailableStreamFastPath) {
+            const fastPathStart = Date.now();
+            const pageTasks = [];
+            let matchedCount = 0;
+            let afterStatusGateCount = 0;
+            let afterAvailableGateCount = 0;
+            let hasMore = false;
+
+            for (let i = 0; i < tasks.length; i += 1) {
+              const t = tasks[i];
+              const taskStatusValue = taskStatus(t);
+              if (isCompletedStatusValue(taskStatusValue) || isDroppedStatusValue(taskStatusValue)) {
+                continue;
+              }
+              afterStatusGateCount += 1;
+
+              if (filterState.flagged !== undefined) {
+                const taskFlagged = Boolean(t.flagged);
+                if (taskFlagged !== filterState.flagged) {
+                  continue;
+                }
+              }
+
+              if (!isAvailableStatusValue(taskStatusValue)) {
+                continue;
+              }
+              if (!isTaskAvailableWithStatus(t, taskStatusValue, undefined)) {
+                continue;
+              }
+
+              afterAvailableGateCount += 1;
+
+              if (matchedCount < safeOffset) {
+                matchedCount += 1;
+                continue;
+              }
+              if (pageTasks.length < limit) {
+                pageTasks.push(t);
+                matchedCount += 1;
+                continue;
+              }
+
+              hasMore = true;
+              break;
+            }
+
+            markListTasks("after_stream_fast_path", {
+              returnedCount: pageTasks.length,
+              scannedCount: tasks.length,
+              matchedCount: matchedCount,
+              afterStatusGateCount: afterStatusGateCount,
+              afterAvailableGateCount: afterAvailableGateCount,
+              durationMs: Date.now() - fastPathStart,
+              offset: safeOffset,
+              limit: limit,
+              hasMore: hasMore
+            });
+
+            const payloadStart = Date.now();
+            const items = pageTasks.map(t => taskToPayload(t, fields));
+            markListTasks("after_payload_map", {
+              returnedCount: items.length,
+              durationMs: Date.now() - payloadStart
+            });
+
+            const returnedCount = items.length;
+            const nextCursor = hasMore ? String(safeOffset + items.length) : null;
+            response.data = { items: items, nextCursor: nextCursor, returnedCount: returnedCount };
+            if (listTasksDebug) {
+              listTasksDebug.totalTimingMs = Date.now() - start;
+              try {
+                writeJSON(basePath + "/logs/list_tasks_debug_" + requestId + ".json", listTasksDebug);
+              } catch (debugError) {}
+            }
+          } else {
+
+            // Filter first, then apply pagination. Cursor semantics are based on the
+            // filtered/sorted result set, not the original OmniFocus flattened list.
+            const filterPassStart = Date.now();
+            tasks = tasks.filter(t => taskMatchesFilters(t, undefined, undefined));
+            markListTasks("after_filter_pass", {
+              count: tasks.length,
+              durationMs: Date.now() - filterPassStart
+            });
+            const totalCount = includeTotalCount ? tasks.length : null;
+
+            // Sort by completion date descending when filtering by completed tasks
+            // This matches OmniFocus Completed perspective behavior
+            if (requiresCompletionSort) {
+              const sortStart = Date.now();
+              tasks.sort((a, b) => {
+                const dateA = getTaskDateTimestamp(a, t => t.completionDate) || 0;
+                const dateB = getTaskDateTimestamp(b, t => t.completionDate) || 0;
+                return dateB - dateA;
+              });
+              markListTasks("after_completion_sort", {
+                count: tasks.length,
+                durationMs: Date.now() - sortStart
+              });
+            }
+
+            // Apply offset + limit to the filtered/sorted task list.
+            const pageTasks = tasks.slice(safeOffset, safeOffset + limit);
+            markListTasks("after_paging", {
+              pageCount: pageTasks.length,
+              totalCount: totalCount,
+              offset: safeOffset,
+              limit: limit
+            });
+            const payloadStart = Date.now();
+            const items = pageTasks.map(t => taskToPayload(t, fields));
+            markListTasks("after_payload_map", {
+              returnedCount: items.length,
+              durationMs: Date.now() - payloadStart
+            });
+
+            // Calculate returned count (actual items in this response)
+            const returnedCount = items.length;
+            
+            // Calculate pagination cursor
+            const hasMore = (safeOffset + items.length) < tasks.length;
+            const nextCursor = hasMore ? String(safeOffset + items.length) : null;
+            
+            // Build response with both counts
+            response.data = { items: items, nextCursor: nextCursor, returnedCount: returnedCount };
+            if (includeTotalCount) {
+              response.data.totalCount = totalCount;
+            }
+            if (listTasksDebug) {
+              listTasksDebug.totalTimingMs = Date.now() - start;
+              try {
+                writeJSON(basePath + "/logs/list_tasks_debug_" + requestId + ".json", listTasksDebug);
+              } catch (debugError) {}
+            }
           }
         } else if (request.op === "list_projects") {
           const fields = request.fields || [];
