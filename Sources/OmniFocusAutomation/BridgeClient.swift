@@ -7,11 +7,20 @@ final class BridgeClient: @unchecked Sendable {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let staleInterval: TimeInterval
+    private let dispatchRunner: SerializedJXARunner
+    private let configuration: BridgeClientConfiguration
 
-    init(paths: IPCPaths = .default(), fileManager: FileManager = .default, staleInterval: TimeInterval = 600) {
+    init(
+        paths: IPCPaths = .default(),
+        fileManager: FileManager = .default,
+        staleInterval: TimeInterval = 600,
+        configuration: BridgeClientConfiguration = .fromEnvironment(ProcessInfo.processInfo.environment)
+    ) {
         self.paths = paths
         self.fileManager = fileManager
         self.staleInterval = staleInterval
+        self.configuration = configuration
+        self.dispatchRunner = SerializedJXARunner(runner: ScriptRunner(), defaultTimeout: configuration.dispatchTimeout)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         self.encoder = encoder
@@ -294,7 +303,31 @@ final class BridgeClient: @unchecked Sendable {
         try data.write(to: requestURL, options: .atomic)
     }
 
+    private var dispatchDirectoryURL: URL {
+        paths.baseURL.appendingPathComponent("dispatch", isDirectory: true)
+    }
+
+    private var dispatchRequestURL: URL {
+        dispatchDirectoryURL.appendingPathComponent("request.json")
+    }
+
+    private func writeDispatchRequestId(_ requestId: String) throws {
+        try fileManager.createDirectory(at: dispatchDirectoryURL, withIntermediateDirectories: true)
+        let payload = ["requestId": requestId]
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        try data.write(to: dispatchRequestURL, options: .atomic)
+    }
+
     private func triggerOmniFocus(requestId: String) throws {
+        switch configuration.dispatchTransport {
+        case .urlScheme:
+            try triggerOmniFocusURLDispatch(requestId: requestId)
+        case .jxaEvaluate:
+            try triggerOmniFocusJXADispatch()
+        }
+    }
+
+    private func triggerOmniFocusURLDispatch(requestId: String) throws {
         let script = bridgeScript(basePath: paths.baseURL.path, requestId: requestId)
         var allowed = CharacterSet.urlQueryAllowed
         allowed.remove(charactersIn: "&+=?")
@@ -312,33 +345,152 @@ final class BridgeClient: @unchecked Sendable {
         try process.run()
     }
 
+    private func triggerOmniFocusJXADispatch() throws {
+        let script = buildBridgeEvaluateDispatchScript(basePath: paths.baseURL.path)
+        let output = try dispatchRunner.runJavaScript(script, timeout: configuration.dispatchTimeout)
+        guard let result = parseBridgeDispatchResult(from: output) else {
+            return
+        }
+        if result.ok {
+            if result.dispatched == false {
+                throw AutomationError.executionFailed("Bridge dispatch did not pick up any pending request")
+            }
+            return
+        }
+        if result.error == "PLUGIN_MISSING" {
+            try retryBridgePluginLookup(basePath: paths.baseURL.path, timeout: configuration.dispatchTimeout)
+            return
+        }
+        throw AutomationError.executionFailed("Bridge dispatch failed: \(result.error ?? "unknown dispatch error")")
+    }
+
     private func sendRequest<T: Decodable>(_ request: BridgeRequest, responseType: T.Type) throws -> BridgeResponse<T> {
         try ensureDirectories()
-        try writeRequest(request, requestId: request.requestId)
-        try triggerOmniFocus(requestId: request.requestId)
-
         let responseURL = paths.responsesURL.appendingPathComponent("\(request.requestId).json")
         let requestURL = paths.requestsURL.appendingPathComponent("\(request.requestId).json")
         let lockURL = paths.locksURL.appendingPathComponent("\(request.requestId).lock")
         do {
-            return try waitForResponse(at: responseURL, timeout: 10.0, responseType: responseType)
+            try writeRequest(request, requestId: request.requestId)
+            try writeDispatchRequestId(request.requestId)
+            try triggerOmniFocus(requestId: request.requestId)
+            let response = try waitForResponse(
+                at: responseURL,
+                requestURL: requestURL,
+                lockURL: lockURL,
+                requestId: request.requestId,
+                timeout: configuration.responseTimeout,
+                responseType: responseType
+            )
+            removeIfExists(url: dispatchRequestURL)
+            return response
         } catch {
-            removeIfExists(url: requestURL)
-            removeIfExists(url: lockURL)
+            if !isTimeoutError(error) {
+                removeIfExists(url: requestURL)
+                removeIfExists(url: lockURL)
+                removeIfExists(url: dispatchRequestURL)
+            }
             throw error
         }
     }
 
-    private func waitForResponse<T: Decodable>(at url: URL, timeout: TimeInterval, responseType: T.Type) throws -> BridgeResponse<T> {
+    private func waitForResponse<T: Decodable>(
+        at url: URL,
+        requestURL: URL,
+        lockURL: URL,
+        requestId: String,
+        timeout: TimeInterval,
+        responseType: T.Type
+    ) throws -> BridgeResponse<T> {
         let start = Date()
+        var lastReadError: Error?
+        var hasRedispatchedStrandedRequest = false
         while Date().timeIntervalSince(start) < timeout {
             if fileManager.fileExists(atPath: url.path) {
+                do {
+                    let data = try Data(contentsOf: url)
+                    return try decoder.decode(BridgeResponse<T>.self, from: data)
+                } catch {
+                    lastReadError = error
+                }
+            }
+
+            if !hasRedispatchedStrandedRequest,
+               shouldRedispatchStrandedRequest(
+                elapsed: Date().timeIntervalSince(start),
+                timeout: timeout,
+                requestURL: requestURL,
+                responseURL: url,
+                lockURL: lockURL
+               ) {
+                do {
+                    try triggerOmniFocus(requestId: requestId)
+                    hasRedispatchedStrandedRequest = true
+                } catch {
+                    lastReadError = error
+                }
+            }
+            Thread.sleep(forTimeInterval: configuration.responsePollInterval)
+        }
+
+        if fileManager.fileExists(atPath: url.path) {
+            do {
                 let data = try Data(contentsOf: url)
                 return try decoder.decode(BridgeResponse<T>.self, from: data)
+            } catch {
+                lastReadError = error
             }
-            Thread.sleep(forTimeInterval: 0.05)
         }
-        throw AutomationError.executionFailed("Bridge response timed out")
+
+        let requestExists = fileManager.fileExists(atPath: requestURL.path)
+        let responseExists = fileManager.fileExists(atPath: url.path)
+        let lockExists = fileManager.fileExists(atPath: lockURL.path)
+
+        if shouldAttemptLateStrandedRecovery(
+            transport: configuration.dispatchTransport,
+            requestExists: requestExists,
+            responseExists: responseExists,
+            lockExists: lockExists
+        ) {
+            do {
+                if let recovered: BridgeResponse<T> = try attemptLateStrandedRecovery(
+                    at: url,
+                    requestId: requestId,
+                    timeout: timeout,
+                    responseType: responseType
+                ) {
+                    return recovered
+                }
+            } catch {
+                lastReadError = error
+            }
+        }
+
+        let timeoutSeconds = String(format: "%.1f", timeout)
+        let lastReadDetail = lastReadError.map { String(describing: $0) } ?? "none"
+        throw AutomationError.executionFailed(
+            "Bridge response timed out after \(timeoutSeconds)s (requestId=\(requestId), requestExists=\(requestExists), responseExists=\(responseExists), lockExists=\(lockExists), lastReadError=\(lastReadDetail))"
+        )
+    }
+
+    private func attemptLateStrandedRecovery<T: Decodable>(
+        at responseURL: URL,
+        requestId: String,
+        timeout: TimeInterval,
+        responseType: T.Type
+    ) throws -> BridgeResponse<T>? {
+        try writeDispatchRequestId(requestId)
+        try triggerOmniFocus(requestId: requestId)
+        let graceDeadline = Date().addingTimeInterval(lateStrandedRecoveryGrace(timeout: timeout))
+
+        while Date() < graceDeadline {
+            if fileManager.fileExists(atPath: responseURL.path) {
+                let data = try Data(contentsOf: responseURL)
+                return try decoder.decode(BridgeResponse<T>.self, from: data)
+            }
+            Thread.sleep(forTimeInterval: configuration.responsePollInterval)
+        }
+
+        return nil
     }
 
     private func cleanupStaleFiles() {
@@ -364,6 +516,187 @@ final class BridgeClient: @unchecked Sendable {
             try? fileManager.removeItem(at: url)
         }
     }
+
+    private func shouldRedispatchStrandedRequest(
+        elapsed: TimeInterval,
+        timeout: TimeInterval,
+        requestURL: URL,
+        responseURL: URL,
+        lockURL: URL
+    ) -> Bool {
+        guard elapsed >= strandedRedispatchDelay(timeout: timeout) else {
+            return false
+        }
+        return fileManager.fileExists(atPath: requestURL.path)
+            && !fileManager.fileExists(atPath: responseURL.path)
+            && !fileManager.fileExists(atPath: lockURL.path)
+    }
+
+    private func isTimeoutError(_ error: Error) -> Bool {
+        guard let automationError = error as? AutomationError else {
+            return false
+        }
+        switch automationError {
+        case .executionFailed(let message):
+            let lower = message.lowercased()
+            return lower.contains("timed out") || lower.contains("timeout")
+        case .scriptCreationFailed, .notImplemented:
+            return false
+        }
+    }
+}
+
+struct BridgeClientConfiguration: Equatable {
+    let responseTimeout: TimeInterval
+    let responsePollInterval: TimeInterval
+    let dispatchTransport: BridgeDispatchTransport
+    let dispatchTimeout: TimeInterval
+
+    static func fromEnvironment(_ environment: [String: String]) -> BridgeClientConfiguration {
+        let parsedTimeout = environment["FOCUS_RELAY_BRIDGE_RESPONSE_TIMEOUT_SECONDS"].flatMap(TimeInterval.init)
+        let timeout = (parsedTimeout ?? 0) > 0 ? parsedTimeout! : 45.0
+
+        let parsedPollInterval = environment["FOCUS_RELAY_BRIDGE_RESPONSE_POLL_MS"]
+            .flatMap(Double.init)
+            .map { $0 / 1000.0 }
+        let pollInterval = (parsedPollInterval ?? 0) > 0 ? parsedPollInterval! : 0.05
+
+        let dispatchTransport = BridgeDispatchTransport.fromEnvironment(environment)
+        let parsedDispatchTimeout = environment["FOCUS_RELAY_BRIDGE_DISPATCH_TIMEOUT_SECONDS"].flatMap(TimeInterval.init)
+        let dispatchTimeout = (parsedDispatchTimeout ?? 0) > 0 ? parsedDispatchTimeout! : 20.0
+
+        return BridgeClientConfiguration(
+            responseTimeout: timeout,
+            responsePollInterval: pollInterval,
+            dispatchTransport: dispatchTransport,
+            dispatchTimeout: dispatchTimeout
+        )
+    }
+}
+
+func strandedRedispatchDelay(timeout: TimeInterval) -> TimeInterval {
+    min(2.0, max(0.5, timeout * 0.1))
+}
+
+func lateStrandedRecoveryGrace(timeout: TimeInterval) -> TimeInterval {
+    min(10.0, max(3.0, timeout * 0.2))
+}
+
+func shouldAttemptLateStrandedRecovery(
+    transport: BridgeDispatchTransport,
+    requestExists: Bool,
+    responseExists: Bool,
+    lockExists: Bool
+) -> Bool {
+    transport == .urlScheme && requestExists && !responseExists && !lockExists
+}
+
+enum BridgeDispatchTransport: Equatable {
+    case urlScheme
+    case jxaEvaluate
+
+    static func fromEnvironment(_ environment: [String: String]) -> BridgeDispatchTransport {
+        let raw = environment["FOCUS_RELAY_BRIDGE_DISPATCH_TRANSPORT"]?.lowercased()
+        return raw == "jxa" ? .jxaEvaluate : .urlScheme
+    }
+}
+
+private struct BridgeDispatchResult: Decodable {
+    let ok: Bool
+    let dispatched: Bool?
+    let error: String?
+}
+
+private func parseBridgeDispatchResult(from output: String) -> BridgeDispatchResult? {
+    let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, trimmed.hasPrefix("{"), trimmed.hasSuffix("}") else {
+        return nil
+    }
+    guard let data = trimmed.data(using: .utf8) else { return nil }
+    return try? JSONDecoder().decode(BridgeDispatchResult.self, from: data)
+}
+
+private func retryBridgePluginLookup(basePath: String, timeout: TimeInterval) throws {
+    let runner = SerializedJXARunner(runner: ScriptRunner(), defaultTimeout: timeout)
+    for attempt in 1...4 {
+        Thread.sleep(forTimeInterval: 0.35)
+        let script = buildBridgeEvaluateDispatchScript(basePath: basePath)
+        let output = try runner.runJavaScript(script, timeout: timeout)
+        guard let result = parseBridgeDispatchResult(from: output) else {
+            return
+        }
+        if result.ok && result.dispatched != false {
+            return
+        }
+        if result.error != "PLUGIN_MISSING" || attempt == 4 {
+            throw AutomationError.executionFailed("Bridge dispatch failed: \(result.error ?? "unknown dispatch error")")
+        }
+    }
+}
+
+func buildBridgeEvaluateDispatchScript(basePath: String) -> String {
+    let automationScript = buildBridgeDispatchScript(basePath: basePath)
+    return """
+    (function() {
+      var app = Application("OmniFocus");
+      app.includeStandardAdditions = false;
+      var automationScript = \(jsonString(automationScript));
+      var result = app.evaluateJavascript(automationScript);
+      return (result === undefined || result === null) ? "" : String(result);
+    })();
+    """
+}
+
+func buildBridgeDispatchScript(basePath: String) -> String {
+    return """
+    (function() {
+      var basePath = \(jsonString(basePath));
+      var dispatchRequestPath = basePath + "/dispatch/request.json";
+
+      function readDispatchRequestId(path) {
+        try {
+          var url = URL.fromString("file://" + path);
+          var wrapper = FileWrapper.fromURL(url);
+          var text = wrapper.contents.toString();
+          if (!text) { return null; }
+          var trimmed = String(text).trim();
+          if (!trimmed) { return null; }
+          if (trimmed.startsWith("{")) {
+            var payload = JSON.parse(trimmed);
+            if (payload && payload.requestId) {
+              return String(payload.requestId);
+            }
+          }
+          return trimmed;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      try {
+        var plugin = PlugIn.find("com.focusrelay.bridge");
+        if (!plugin) {
+          return JSON.stringify({ ok: false, dispatched: false, error: "PLUGIN_MISSING" });
+        }
+        var lib = plugin.library("BridgeLibrary");
+        if (lib && typeof lib.handleRequest === "function") {
+          var requestId = readDispatchRequestId(dispatchRequestPath);
+          if (!requestId) {
+            return JSON.stringify({ ok: false, dispatched: false, error: "DISPATCH_REQUEST_ID_MISSING" });
+          }
+          lib.handleRequest(requestId, basePath);
+          return JSON.stringify({ ok: true, dispatched: true, handler: "handleRequest", requestId: requestId });
+        }
+        if (lib && typeof lib.handleNextRequest === "function") {
+          var dispatched = lib.handleNextRequest(basePath);
+          return JSON.stringify({ ok: true, dispatched: Boolean(dispatched), handler: "handleNextRequest" });
+        }
+        return JSON.stringify({ ok: false, dispatched: false, error: "NO_COMPATIBLE_HANDLER" });
+      } catch (err) {
+        return JSON.stringify({ ok: false, dispatched: false, error: String(err) });
+      }
+    })();
+    """
 }
 
 private func bridgeScript(basePath: String, requestId: String) -> String {
