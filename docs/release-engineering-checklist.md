@@ -132,11 +132,25 @@ focusrelay --help
 Rule:
 - Do not consider the release done until the Homebrew install path is validated.
 
+Install-flow validation:
+1. Verify the README order still matches the real path: install binary -> install plugin -> configure MCP -> restart OmniFocus -> approve first query.
+2. If the plugin changed, reinstall it before validating.
+3. Trigger a real query after restart so the OmniFocus approval prompt can appear:
+
+```bash
+focusrelay bridge-health-check
+focusrelay list-tasks --fields id,name --limit 1
+```
+
+4. If the approval prompt does not appear when expected, treat the release as not validated.
+5. After approval, confirm the first query returns real task data rather than a timeout or empty transport failure.
+
 ## 10. Post-Release Sanity Check
 
 - confirm the installed formula version matches the release
 - confirm the plugin bundle exists in the Homebrew package share path
 - if plugin JS changed, reinstall the plugin locally and restart OmniFocus before local validation
+- confirm the first-query approval path and README setup steps still match the actual product behavior
 
 ## 11. Communication Checklist
 
