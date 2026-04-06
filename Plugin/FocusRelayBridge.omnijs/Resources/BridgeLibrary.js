@@ -125,8 +125,20 @@
         estimatedMinutes: hasField("estimatedMinutes") ? t.estimatedMinutes : null,
         available: hasField("available") ? isTaskAvailable(t) : null,
         repetitionRule: hasField("repetitionRule") && repRule ? String(safe(() => repRule.ruleString) || "") : null,
-        repetitionScheduleType: hasField("repetitionScheduleType") && repRule ? String(safe(() => repRule.scheduleType.name) || "") : null,
-        repetitionAnchorDate: hasField("repetitionAnchorDate") && repRule ? String(safe(() => repRule.anchorDateKey.name) || "") : null
+        repetitionScheduleType: hasField("repetitionScheduleType") && repRule ? safe(() => {
+          var st = repRule.scheduleType;
+          if (st === Task.RepetitionScheduleType.FromCompletion) return "FromCompletion";
+          if (st === Task.RepetitionScheduleType.Regularly) return "Regularly";
+          if (st === Task.RepetitionScheduleType.None) return "None";
+          return String(st);
+        }) : null,
+        repetitionAnchorDate: hasField("repetitionAnchorDate") && repRule ? safe(() => {
+          var ak = repRule.anchorDateKey;
+          if (ak === Task.AnchorDateKey.DueDate) return "DueDate";
+          if (ak === Task.AnchorDateKey.DeferDate) return "DeferDate";
+          if (ak === Task.AnchorDateKey.PlannedDate) return "PlannedDate";
+          return String(ak);
+        }) : null
       };
     }
 
