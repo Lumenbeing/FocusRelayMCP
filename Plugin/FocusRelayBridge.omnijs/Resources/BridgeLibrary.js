@@ -106,6 +106,7 @@
       const dueDate = hasField("dueDate") ? safe(() => t.dueDate) : null;
       const plannedDate = hasField("plannedDate") ? safe(() => t.plannedDate) : null;
       const deferDate = hasField("deferDate") ? safe(() => t.deferDate) : null;
+      const repRule = (hasField("repetitionRule") || hasField("repetitionScheduleType") || hasField("repetitionAnchorDate")) ? safe(() => t.repetitionRule) : null;
 
       return {
         id: hasField("id") ? String(safe(() => t.id.primaryKey) || "") : null,
@@ -122,7 +123,10 @@
         completed: hasField("completed") ? isCompletedStatus(t) : null,
         flagged: hasField("flagged") ? Boolean(t.flagged) : null,
         estimatedMinutes: hasField("estimatedMinutes") ? t.estimatedMinutes : null,
-        available: hasField("available") ? isTaskAvailable(t) : null
+        available: hasField("available") ? isTaskAvailable(t) : null,
+        repetitionRule: hasField("repetitionRule") && repRule ? String(safe(() => repRule.ruleString) || "") : null,
+        repetitionScheduleType: hasField("repetitionScheduleType") && repRule ? String(safe(() => repRule.scheduleType.name) || "") : null,
+        repetitionAnchorDate: hasField("repetitionAnchorDate") && repRule ? String(safe(() => repRule.anchorDateKey.name) || "") : null
       };
     }
 

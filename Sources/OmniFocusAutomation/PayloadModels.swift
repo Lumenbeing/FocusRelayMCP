@@ -16,6 +16,9 @@ struct TaskItemPayload: Codable {
     let flagged: Bool?
     let estimatedMinutes: Int?
     let available: Bool?
+    let repetitionRule: String?
+    let repetitionScheduleType: String?
+    let repetitionAnchorDate: String?
 }
 
 struct ProjectTaskSummaryPayload: Codable {

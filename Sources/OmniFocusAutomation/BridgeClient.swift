@@ -64,7 +64,10 @@ final class BridgeClient: @unchecked Sendable {
                     completed: payload.completed ?? false,
                     flagged: payload.flagged ?? false,
                     estimatedMinutes: payload.estimatedMinutes,
-                    available: payload.available ?? false
+                    available: payload.available ?? false,
+                    repetitionRule: payload.repetitionRule,
+                    repetitionScheduleType: payload.repetitionScheduleType,
+                    repetitionAnchorDate: payload.repetitionAnchorDate
                 )
             }
             return Page(items: items, nextCursor: payloadPage.nextCursor, returnedCount: payloadPage.returnedCount, totalCount: payloadPage.totalCount)
@@ -232,7 +235,10 @@ final class BridgeClient: @unchecked Sendable {
                 completed: payload.completed ?? false,
                 flagged: payload.flagged ?? false,
                 estimatedMinutes: payload.estimatedMinutes,
-                available: payload.available ?? false
+                available: payload.available ?? false,
+                repetitionRule: payload.repetitionRule,
+                repetitionScheduleType: payload.repetitionScheduleType,
+                repetitionAnchorDate: payload.repetitionAnchorDate
             )
         }
 

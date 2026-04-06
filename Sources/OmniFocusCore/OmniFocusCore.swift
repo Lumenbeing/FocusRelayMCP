@@ -16,6 +16,9 @@ public struct TaskItem: Codable, Sendable {
     public let flagged: Bool
     public let estimatedMinutes: Int?
     public let available: Bool
+    public let repetitionRule: String?
+    public let repetitionScheduleType: String?
+    public let repetitionAnchorDate: String?
 
     public init(
         id: String,
@@ -32,7 +35,10 @@ public struct TaskItem: Codable, Sendable {
         completed: Bool,
         flagged: Bool,
         estimatedMinutes: Int? = nil,
-        available: Bool
+        available: Bool,
+        repetitionRule: String? = nil,
+        repetitionScheduleType: String? = nil,
+        repetitionAnchorDate: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -49,6 +55,9 @@ public struct TaskItem: Codable, Sendable {
         self.flagged = flagged
         self.estimatedMinutes = estimatedMinutes
         self.available = available
+        self.repetitionRule = repetitionRule
+        self.repetitionScheduleType = repetitionScheduleType
+        self.repetitionAnchorDate = repetitionAnchorDate
     }
 }
 

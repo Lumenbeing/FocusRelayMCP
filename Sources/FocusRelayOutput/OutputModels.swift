@@ -17,6 +17,9 @@ public struct TaskOutput: Encodable {
     public let flagged: Bool?
     public let estimatedMinutes: Int?
     public let available: Bool?
+    public let repetitionRule: String?
+    public let repetitionScheduleType: String?
+    public let repetitionAnchorDate: String?
 
     public init(
         id: String?,
@@ -33,7 +36,10 @@ public struct TaskOutput: Encodable {
         completed: Bool?,
         flagged: Bool?,
         estimatedMinutes: Int?,
-        available: Bool?
+        available: Bool?,
+        repetitionRule: String?,
+        repetitionScheduleType: String?,
+        repetitionAnchorDate: String?
     ) {
         self.id = id
         self.name = name
@@ -50,6 +56,9 @@ public struct TaskOutput: Encodable {
         self.flagged = flagged
         self.estimatedMinutes = estimatedMinutes
         self.available = available
+        self.repetitionRule = repetitionRule
+        self.repetitionScheduleType = repetitionScheduleType
+        self.repetitionAnchorDate = repetitionAnchorDate
     }
 }
 
@@ -169,7 +178,10 @@ public func makeTaskOutput(from task: TaskItem, fields: Set<String>) -> TaskOutp
         completed: fields.contains("completed") ? task.completed : nil,
         flagged: fields.contains("flagged") ? task.flagged : nil,
         estimatedMinutes: fields.contains("estimatedMinutes") ? task.estimatedMinutes : nil,
-        available: fields.contains("available") ? task.available : nil
+        available: fields.contains("available") ? task.available : nil,
+        repetitionRule: fields.contains("repetitionRule") ? task.repetitionRule : nil,
+        repetitionScheduleType: fields.contains("repetitionScheduleType") ? task.repetitionScheduleType : nil,
+        repetitionAnchorDate: fields.contains("repetitionAnchorDate") ? task.repetitionAnchorDate : nil
     )
 }
 
