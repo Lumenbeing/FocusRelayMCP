@@ -95,6 +95,11 @@ public struct ProjectOutput: Encodable {
     public let containsSingletonActions: Bool?
     public let isStalled: Bool?
     public let completionDate: Date?
+    public let folderName: String?
+    public let folderId: String?
+    public let folderPath: [String]?
+    public let tagNames: [String]?
+    public let tagIds: [String]?
 
     public init(
         id: String?,
@@ -114,7 +119,12 @@ public struct ProjectOutput: Encodable {
         nextTask: ProjectTaskSummary?,
         containsSingletonActions: Bool?,
         isStalled: Bool?,
-        completionDate: Date?
+        completionDate: Date?,
+        folderName: String?,
+        folderId: String?,
+        folderPath: [String]?,
+        tagNames: [String]?,
+        tagIds: [String]?
     ) {
         self.id = id
         self.name = name
@@ -134,6 +144,11 @@ public struct ProjectOutput: Encodable {
         self.containsSingletonActions = containsSingletonActions
         self.isStalled = isStalled
         self.completionDate = completionDate
+        self.folderName = folderName
+        self.folderId = folderId
+        self.folderPath = folderPath
+        self.tagNames = tagNames
+        self.tagIds = tagIds
     }
 }
 
@@ -204,7 +219,12 @@ public func makeProjectOutput(from project: ProjectItem, fields: Set<String>, in
         nextTask: fields.contains("nextTask") ? project.nextTask : nil,
         containsSingletonActions: fields.contains("containsSingletonActions") ? project.containsSingletonActions : nil,
         isStalled: fields.contains("isStalled") ? project.isStalled : nil,
-        completionDate: fields.contains("completionDate") ? project.completionDate : nil
+        completionDate: fields.contains("completionDate") ? project.completionDate : nil,
+        folderName: fields.contains("folderName") ? project.folderName : nil,
+        folderId: fields.contains("folderId") ? project.folderId : nil,
+        folderPath: fields.contains("folderPath") ? project.folderPath : nil,
+        tagNames: fields.contains("tagNames") ? project.tagNames : nil,
+        tagIds: fields.contains("tagIds") ? project.tagIds : nil
     )
 }
 

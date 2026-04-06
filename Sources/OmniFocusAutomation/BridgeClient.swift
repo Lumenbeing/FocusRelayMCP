@@ -188,7 +188,12 @@ final class BridgeClient: @unchecked Sendable {
                     nextTask: nextTask,
                     containsSingletonActions: payload.containsSingletonActions,
                     isStalled: payload.isStalled,
-                    completionDate: payload.completionDate
+                    completionDate: payload.completionDate,
+                    folderName: payload.folderName,
+                    folderId: payload.folderId,
+                    folderPath: payload.folderPath ?? [],
+                    tagNames: payload.tagNames ?? [],
+                    tagIds: payload.tagIds ?? []
                 )
             }
             return Page(items: items, nextCursor: payloadPage.nextCursor, returnedCount: payloadPage.returnedCount, totalCount: payloadPage.totalCount)

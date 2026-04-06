@@ -50,6 +50,11 @@ struct ProjectItemPayload: Codable {
     let containsSingletonActions: Bool?
     let isStalled: Bool?
     let completionDate: Date?
+    let folderName: String?
+    let folderId: String?
+    let folderPath: [String]?
+    let tagNames: [String]?
+    let tagIds: [String]?
 }
 
 struct TagItemPayload: Codable {

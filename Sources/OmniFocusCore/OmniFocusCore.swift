@@ -100,6 +100,11 @@ public struct ProjectItem: Codable, Sendable {
     public let containsSingletonActions: Bool?
     public let isStalled: Bool?
     public let completionDate: Date?
+    public let folderName: String?
+    public let folderId: String?
+    public let folderPath: [String]
+    public let tagNames: [String]
+    public let tagIds: [String]
 
     public init(
         id: String,
@@ -119,7 +124,12 @@ public struct ProjectItem: Codable, Sendable {
         nextTask: ProjectTaskSummary? = nil,
         containsSingletonActions: Bool? = nil,
         isStalled: Bool? = nil,
-        completionDate: Date? = nil
+        completionDate: Date? = nil,
+        folderName: String? = nil,
+        folderId: String? = nil,
+        folderPath: [String] = [],
+        tagNames: [String] = [],
+        tagIds: [String] = []
     ) {
         self.id = id
         self.name = name
@@ -139,6 +149,11 @@ public struct ProjectItem: Codable, Sendable {
         self.containsSingletonActions = containsSingletonActions
         self.isStalled = isStalled
         self.completionDate = completionDate
+        self.folderName = folderName
+        self.folderId = folderId
+        self.folderPath = folderPath
+        self.tagNames = tagNames
+        self.tagIds = tagIds
     }
 }
 
