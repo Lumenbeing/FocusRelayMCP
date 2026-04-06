@@ -926,6 +926,20 @@
             }
             
             const completionDate = hasField("completionDate") ? safe(() => p.completionDate) : null;
+            const folder = (hasField("folderName") || hasField("folderId") || hasField("folderPath")) ? (safe(() => p.folder) || safe(() => p.parentFolder) || safe(() => p.containingFolder)) : null;
+            // Walk up folder hierarchy to build full path
+            let folderPathParts = [];
+            if (hasField("folderPath") && folder) {
+              let f = folder;
+              while (f) {
+                const fname = safe(() => f.name);
+                if (fname) folderPathParts.unshift(fname);
+                f = safe(() => f.parent);
+                // Stop if parent is not a Folder (e.g. it's the document root)
+                if (f && !safe(() => f.name)) break;
+              }
+            }
+            const tags = (hasField("tagNames") || hasField("tagIds")) ? (safe(() => p.tags) || []) : [];
 
             const item = {
               id: hasField("id") ? String(safe(() => p.id.primaryKey) || "") : null,
@@ -936,7 +950,12 @@
               lastReviewDate: hasField("lastReviewDate") && lastReviewDate ? lastReviewDate.toISOString() : null,
               nextReviewDate: hasField("nextReviewDate") && nextReviewDate ? nextReviewDate.toISOString() : null,
               reviewInterval: hasField("reviewInterval") ? reviewIntervalPayload : null,
-              completionDate: hasField("completionDate") && completionDate ? completionDate.toISOString() : null
+              completionDate: hasField("completionDate") && completionDate ? completionDate.toISOString() : null,
+              folderName: hasField("folderName") && folder ? String(safe(() => folder.name) || "") : null,
+              folderId: hasField("folderId") && folder ? String(safe(() => folder.id.primaryKey) || "") : null,
+              folderPath: hasField("folderPath") && folderPathParts.length > 0 ? folderPathParts : null,
+              tagNames: hasField("tagNames") ? tags.map(tag => String(safe(() => tag.name) || "")) : null,
+              tagIds: hasField("tagIds") ? tags.map(tag => String(safe(() => tag.id.primaryKey) || "")) : null
             };
             
             // Calculate task counts from flattenedTasks
